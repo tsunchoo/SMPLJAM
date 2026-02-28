@@ -417,13 +417,27 @@ var ALL_NOTES=[];
 (function(){for(var o=1;o<=4;o++) for(var n=0;n<12;n++){var m=(o+1)*12+n;ALL_NOTES.push({midi:m,freq:440*Math.pow(2,(m-69)/12),name:NOTE_NAMES[n]+o});}})();
 
 function detectPitch(buffer, sampleRate) {
-  var SIZE=buffer.length, MAX=Math.floor(SIZE/2), rms=0;
-  for(var i=0;i<SIZE;i++) rms+=buffer[i]*buffer[i]; rms=Math.sqrt(rms/SIZE);
-  if(rms<0.008) return null;
-  var bestOff=-1, bestCorr=0;
-  for(var off=20;off<MAX;off++){var c=0;for(var j=0;j<MAX;j++) c+=buffer[j]*buffer[j+off];if(c>bestCorr){bestCorr=c;bestOff=off;}}
-  if(bestOff===-1||bestCorr<0.01) return null;
-  return sampleRate/bestOff;
+  // Only search for fundamentals in the singing/humming range: 70–600 Hz
+  var minOff = Math.floor(sampleRate / 600);
+  var maxOff = Math.floor(sampleRate / 70);
+  if (maxOff >= buffer.length) maxOff = buffer.length - 1;
+
+  // RMS gate — use a lower threshold since getFloatTimeDomainData values are small
+  var rms = 0;
+  for (var i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
+  rms = Math.sqrt(rms / buffer.length);
+  if (rms < 0.002) return null;
+
+  // Autocorrelation over a fixed window of 1024 samples (fast enough for mobile)
+  var WIN = Math.min(1024, Math.floor(buffer.length / 2));
+  var bestOff = -1, bestCorr = -1;
+  for (var off = minOff; off <= maxOff; off++) {
+    var c = 0;
+    for (var j = 0; j < WIN; j++) c += buffer[j] * buffer[j + off];
+    if (c > bestCorr) { bestCorr = c; bestOff = off; }
+  }
+  if (bestOff === -1 || bestCorr < 0.002) return null;
+  return sampleRate / bestOff;
 }
 function freqToNote(freq) {
   if(!freq||freq<40||freq>2000) return null;
@@ -472,7 +486,9 @@ async function toggleBassCapture() {
     analyser.getFloatTimeDomainData(buf);
     var freq=detectPitch(buf,ctx.sampleRate);
     var note=freq?freqToNote(freq):null;
+    if(freq) console.log('[bass] freq='+Math.round(freq)+'hz note='+(note?note.name:'none'));
     if(note) setStatus('hearing: '+note.name);
+    else if(freq) setStatus('~'+Math.round(freq)+'hz (out of note range)');
     if(note&&lastNote&&note.midi===lastNote.midi){
       steadyCount++;
       if(steadyCount===3){
