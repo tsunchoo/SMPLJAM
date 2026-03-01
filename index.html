@@ -308,12 +308,30 @@ function chunksToBuffer(chunks){
 }
 function trimSilence(buf){
   var data=buf.getChannelData(0), sr=buf.sampleRate;
+  // Find peak so we can work with normalised levels
   var peak=0; for(var p=0;p<data.length;p++){var ap=Math.abs(data[p]);if(ap>peak)peak=ap;}
   if(peak<0.001) return buf;
-  var thr=peak*0.04, win=Math.max(Math.floor(sr*0.003),1), start=-1;
-  for(var n=0;n<data.length-win;n+=win){
-    var ws=0; for(var w=0;w<win;w++) ws+=data[n+w]*data[n+w];
-    if(Math.sqrt(ws/win)>thr){start=Math.max(0,n-win);break;}
+
+  // Use 3ms windows; look for the first window whose RMS is BOTH
+  // above an absolute floor (0.02 normalised) AND at least 4x louder
+  // than the average of the preceding 5 windows — i.e. a real onset.
+  var win=Math.max(Math.floor(sr*0.003),32);
+  var rmsHistory=[], start=-1;
+  for(var n=0;n+win<data.length;n+=win){
+    var ws=0; for(var w=0;w<win;w++){var s=data[n+w]/peak;ws+=s*s;}
+    var rms=Math.sqrt(ws/win);
+    rmsHistory.push(rms);
+    if(rmsHistory.length>5){
+      var prev=0; for(var h=rmsHistory.length-6;h<rmsHistory.length-1;h++) prev+=rmsHistory[h];
+      prev/=5;
+      // Onset = loud enough AND significantly louder than recent background
+      if(rms>0.03 && (prev<0.005 || rms>prev*3.5)){
+        start=Math.max(0,n-win); break;
+      }
+    } else if(rms>0.05){
+      // In the first few windows, just use a hard threshold
+      start=Math.max(0,n-win); break;
+    }
   }
   if(start<=0) return buf;
   var ctx=getAudioCtx(), nc=buf.numberOfChannels, newLen=buf.length-start;
