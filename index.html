@@ -210,7 +210,7 @@ async function getMic() {
   if (micStream) return micStream;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:true, noiseSuppression:false, autoGainControl:false}, video:false
+      audio:{echoCancellation:true, noiseSuppression:true}, video:false
     });
     return micStream;
   } catch(e) { setStatus('mic denied'); return null; }
@@ -279,17 +279,14 @@ function stopLiveViz(pad){
 function startPCMRecord(pad, stream) {
   var ctx=getAudioCtx();
   var source=ctx.createMediaStreamSource(stream);
-  // High-pass to kill DC offset
-  var hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=60;
-  source.connect(hp);
-  var analyser=ctx.createAnalyser(); analyser.fftSize=2048;
-  hp.connect(analyser); pad.analyser=analyser; pad.analyserSource=source;
-  var recorder=ctx.createScriptProcessor(2048,1,1);
+  var analyser=ctx.createAnalyser(); analyser.fftSize=1024;
+  source.connect(analyser); pad.analyser=analyser; pad.analyserSource=source;
+  var recorder=ctx.createScriptProcessor(4096,1,1);
   recorder.onaudioprocess=function(e){
     if(pad.state==='rec') pad.pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
   };
   var mute=ctx.createGain(); mute.gain.value=0;
-  hp.connect(recorder); recorder.connect(mute); mute.connect(ctx.destination);
+  source.connect(recorder); recorder.connect(mute); mute.connect(ctx.destination);
   pad.scriptRecorder=recorder; pad.muteGain=mute;
 }
 function stopPCMRecord(pad){
@@ -308,30 +305,12 @@ function chunksToBuffer(chunks){
 }
 function trimSilence(buf){
   var data=buf.getChannelData(0), sr=buf.sampleRate;
-  // Find peak so we can work with normalised levels
   var peak=0; for(var p=0;p<data.length;p++){var ap=Math.abs(data[p]);if(ap>peak)peak=ap;}
   if(peak<0.001) return buf;
-
-  // Use 3ms windows; look for the first window whose RMS is BOTH
-  // above an absolute floor (0.02 normalised) AND at least 4x louder
-  // than the average of the preceding 5 windows — i.e. a real onset.
-  var win=Math.max(Math.floor(sr*0.003),32);
-  var rmsHistory=[], start=-1;
-  for(var n=0;n+win<data.length;n+=win){
-    var ws=0; for(var w=0;w<win;w++){var s=data[n+w]/peak;ws+=s*s;}
-    var rms=Math.sqrt(ws/win);
-    rmsHistory.push(rms);
-    if(rmsHistory.length>5){
-      var prev=0; for(var h=rmsHistory.length-6;h<rmsHistory.length-1;h++) prev+=rmsHistory[h];
-      prev/=5;
-      // Onset = loud enough AND significantly louder than recent background
-      if(rms>0.03 && (prev<0.005 || rms>prev*3.5)){
-        start=Math.max(0,n-win); break;
-      }
-    } else if(rms>0.05){
-      // In the first few windows, just use a hard threshold
-      start=Math.max(0,n-win); break;
-    }
+  var thr=peak*0.05, win=Math.max(Math.floor(sr*0.002),1), start=-1;
+  for(var n=0;n<data.length-win;n+=win){
+    var ws=0; for(var w=0;w<win;w++) ws+=data[n+w]*data[n+w];
+    if(Math.sqrt(ws/win)>thr){start=Math.max(0,n-win);break;}
   }
   if(start<=0) return buf;
   var ctx=getAudioCtx(), nc=buf.numberOfChannels, newLen=buf.length-start;
@@ -415,8 +394,8 @@ function playBassNote(freq, durSec, vel) {
   var osc=ctx.createOscillator(), gain=ctx.createGain();
   osc.type='sine'; osc.frequency.value=freq;
   gain.gain.setValueAtTime(0,now);
-  gain.gain.linearRampToValueAtTime(vel*0.8,now+0.015);
-  gain.gain.setValueAtTime(vel*0.8,now+durSec*0.65);
+  gain.gain.linearRampToValueAtTime(vel*0.42,now+0.015);
+  gain.gain.setValueAtTime(vel*0.42,now+durSec*0.65);
   gain.gain.exponentialRampToValueAtTime(0.001,now+durSec*0.98);
   osc.connect(gain); gain.connect(masterGain);
   osc.start(now); osc.stop(now+durSec);
@@ -690,15 +669,8 @@ function buildGrooveSelector(){
 
 buildUI();
 buildGrooveSelector();
-// Pre-warm mic and audio context on very first touch so they're ready instantly
-var micReady = false;
-function prewarm(){
-  if(micReady) return; micReady=true;
-  getAudioCtx();
-  getMic(); // fire and forget — just ensures mic permission is granted and stream cached
-}
-document.addEventListener('click',     prewarm);
-document.addEventListener('touchstart',prewarm, {passive:true});
+document.addEventListener('click',     function(){getAudioCtx();getMic();},{once:true});
+document.addEventListener('touchstart',function(){getAudioCtx();getMic();},{once:true,passive:true});
 setStatus('hold a pad to record');
 </script>
 </body>
