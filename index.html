@@ -432,12 +432,10 @@ function padHoldStart(idx){
     if(pad.state!=='beep'){duckMaster(false);return;}
     pad.pcmChunks=[]; pad.state='rec'; updatePadUI(idx);
     startPCMRecord(pad,stream); startLiveViz(pad);
-    pad.recTimer=setTimeout(function(){padHoldEnd(idx);},oneBeatMs());
   });
 }
 function padHoldEnd(idx){
   var pad=pads[idx];
-  if(pad.recTimer){clearTimeout(pad.recTimer);pad.recTimer=null;}
   if(pad.state==='beep'){pad.state=pad.buffer?'play':'empty';updatePadUI(idx);duckMaster(false);return;}
   if(pad.state!=='rec') return;
   pad.state='proc'; updatePadUI(idx); stopPCMRecord(pad); duckMaster(false);
@@ -460,12 +458,10 @@ function bassHoldStart(){
     if(pad.state!=='beep'){duckMaster(false);return;}
     pad.pcmChunks=[]; pad.state='rec'; updatePadUI(3);
     startPCMRecord(pad,stream); startLiveViz(pad);
-    pad.recTimer=setTimeout(function(){bassHoldEnd();},barMs());
   });
 }
 function bassHoldEnd(){
   var pad=pads[3];
-  if(pad.recTimer){clearTimeout(pad.recTimer);pad.recTimer=null;}
   if(pad.state==='beep'){pad.state=pad.buffer?'play':'empty';updatePadUI(3);duckMaster(false);return;}
   if(pad.state!=='rec') return;
   pad.state='proc'; updatePadUI(3); stopPCMRecord(pad); duckMaster(false);
@@ -502,7 +498,6 @@ function triggerPad(idx, vel){
 
 function clearPad(idx){
   var pad=pads[idx];
-  if(pad.recTimer){clearTimeout(pad.recTimer);pad.recTimer=null;}
   pad.buffer=null; pad.bassNotes=null; pad.state='empty';
   pad.offset=0; pad.cut=false; pad.muted=false;
   clearWaveform(idx); updatePadUI(idx);
@@ -663,7 +658,7 @@ function buildUI(){
 function buildGrooveSelector(){
   var sel=document.getElementById('groove-select');
   GROOVES.forEach(function(g,i){
-    var o=document.createElement('option'); o.value=i; o.textContent=g.name; sel.appendChild(o);
+    var o=document.createElement('option'); o.value=i; o.textContent=g.name; if(g.name==='Funk') o.selected=true; sel.appendChild(o);
   });
 }
 
